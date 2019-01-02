@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -56,20 +57,32 @@ func main() {
 	prs := listPRs(client)
 	log.Printf("Finished listing PRs. %v", len(prs))
 
-	ftpr := filterPRsForTime(prs, startTime, endTime)
-	log.Printf("Finished filtering PRs for time. %v", len(ftpr))
+	timeFilteredPRs := filterPRsForTime(prs, startTime, endTime)
+	log.Printf("Finished filtering PRs for time. %v", len(timeFilteredPRs))
 
-	fapr := filterPRsForAuthors(ftpr, users)
-	log.Printf("Finished filtering PRs for authors. %v", len(fapr))
+	otherAuthorPRs, authoredPRs := filterPRsForAuthors(timeFilteredPRs, users)
+	log.Printf("Finished filtering PRs for authors. %v", len(otherAuthorPRs))
 
-	touchedPRs := filterPRsForTouch(client, fapr, users)
-	log.Printf("Total PRs: %v. Commented PRs: %v", len(fapr), len(touchedPRs))
+	reviewedPRs := filterPRsForTouch(client, otherAuthorPRs, users)
+	log.Printf("Total PRs: %v. Commented PRs: %v", len(otherAuthorPRs), len(reviewedPRs))
 
-	totalLinesAdded := countLinesAdded(client, fapr)
-	touchedLinesAdded := countLinesAdded(client, touchedPRs)
-	log.Printf("Total lines added: %v. I reviewed %v.", totalLinesAdded, touchedLinesAdded)
+	lc := &lineCounter{
+		client: client,
+		cache: map[string]int64{},
+	}
+	totalLinesAdded := lc.added(timeFilteredPRs)
+	log.Printf("Total lines added: %v", totalLinesAdded)
+	totalNonAuthoredLinesAdded := lc.added(otherAuthorPRs)
+	log.Printf("Total non-authored lines added: %v", totalNonAuthoredLinesAdded)
+	authoredLinesAdded := lc.added(authoredPRs)
+	log.Printf("Total lines authored: %v", authoredLinesAdded)
+	reviewedLinesAdded := lc.added(reviewedPRs)
+	log.Printf("Total lines reviewed: %v", reviewedLinesAdded)
+	if totalNonAuthoredLinesAdded > 0 {
+		log.Printf("Percent non-authored lines reviewed: %v", float64(reviewedLinesAdded)/float64(totalNonAuthoredLinesAdded))
+	}
 	if totalLinesAdded > 0 {
-		log.Printf("Percent lines reviewed: %v", float64(touchedLinesAdded)/float64(totalLinesAdded))
+		log.Printf("Percent of all lines authored or reviewed: %v", float64(authoredLinesAdded + reviewedLinesAdded)/float64(totalLinesAdded))
 	}
 }
 
@@ -124,14 +137,17 @@ func filterPRsForTime(unfiltered []*github.PullRequest, startTime time.Time, end
 	return prs
 }
 
-func filterPRsForAuthors(unfiltered []*github.PullRequest, authors []string) []*github.PullRequest {
+func filterPRsForAuthors(unfiltered []*github.PullRequest, authors []string) ([]*github.PullRequest, []*github.PullRequest) {
 	prs := make([]*github.PullRequest, 0)
+	authoredPRs := make([]*github.PullRequest, 0)
 	for _, pr := range unfiltered {
-		if !contains(authors, pr.GetUser().GetLogin()) {
+		if contains(authors, pr.GetUser().GetLogin()) {
+			authoredPRs = append(authoredPRs, pr)
+		} else {
 			prs = append(prs, pr)
 		}
 	}
-	return prs
+	return prs, authoredPRs
 }
 
 func contains(set []string, s string) bool {
@@ -216,14 +232,20 @@ func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string)
 	}
 }
 
-func countLinesAdded(client *github.Client, prs []*github.PullRequest) int64 {
+type lineCounter struct {
+	client *github.Client
+	cache map[string]int64
+	cacheLock sync.Mutex
+}
+
+func (lc *lineCounter) added(prs []*github.PullRequest) int64 {
 	input := make(chan *github.PullRequest, len(prs))
 	output := make(chan int64, len(prs))
 	for i := 0; i < parallelWorkers; i++ {
 		go func() {
 			for {
 				pr := <-input
-				output <- countNonVendorLines(client, pr)
+				output <- lc.countNonVendorLines(pr)
 			}
 		}()
 	}
@@ -237,16 +259,27 @@ func countLinesAdded(client *github.Client, prs []*github.PullRequest) int64 {
 	return count
 }
 
-func countNonVendorLines(client *github.Client, pr *github.PullRequest) int64 {
-	var count int64
+func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
+	count := func() int64 {
+		lc.cacheLock.Lock()
+		defer lc.cacheLock.Unlock()
+		if count, contains := lc.cache[pr.GetHTMLURL()]; contains {
+			return count
+		}
+		return -1
+		}()
+	if count != -1 {
+		return count
+	}
+	count = 0
 	page := 0
 	for {
-		f, r, err := client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
+		f, r, err := lc.client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
 			Page: page,
 		})
 
 		if err != nil {
-			log.Fatalf("Unable to get reviews on PR %v: %v", pr.GetNumber(), err)
+			log.Fatalf("Unable to get files on PR %v: %v", pr.GetNumber(), err)
 		}
 		for _, file := range f {
 			if !strings.HasPrefix(file.GetFilename(), "vendor/") {
@@ -255,7 +288,11 @@ func countNonVendorLines(client *github.Client, pr *github.PullRequest) int64 {
 		}
 		page = r.NextPage
 		if page == 0 {
-			return count
+			break
 		}
 	}
+	lc.cacheLock.Lock()
+	defer lc.cacheLock.Unlock()
+	lc.cache[pr.GetHTMLURL()] = count
+	return count
 }
