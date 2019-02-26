@@ -29,6 +29,8 @@ var (
 	// for 0.75 seconds, which should limit the number of requests to 4800 requests per hour.
 	sleep = 750 * time.Millisecond
 	parallelWorkers = 1
+
+	retryCount = 5
 )
 
 type stringSlice []string
@@ -110,15 +112,16 @@ func listPRs(client *github.Client) []*github.PullRequest {
 	for _, repo := range repos {
 		page := 0
 		for {
-			p, r, err := client.PullRequests.List(context.TODO(), *owner, repo, &github.PullRequestListOptions{
-				State:     "all",
-				Sort:      "updated",
-				Direction: "desc",
-				ListOptions: github.ListOptions{
-					Page: page,
-				},
+			p, r, err := retryListUpTo(retryCount, func() ([]*github.PullRequest, *github.Response, error) {
+				return client.PullRequests.List(context.TODO(), *owner, repo, &github.PullRequestListOptions{
+					State:     "all",
+					Sort:      "updated",
+					Direction: "desc",
+					ListOptions: github.ListOptions{
+						Page: page,
+					},
+				})
 			})
-			time.Sleep(sleep)
 			if err != nil {
 				log.Fatalf("Unable to list PRs for page: %v: %v", page, err)
 			}
@@ -130,6 +133,20 @@ func listPRs(client *github.Client) []*github.PullRequest {
 		}
 	}
 	return prs
+}
+
+func retryListUpTo(count int, f func() ([]*github.PullRequest, *github.Response, error)) ([]*github.PullRequest, *github.Response, error) {
+	i := 1
+	for {
+		p, r, err := f()
+		time.Sleep(sleep)
+		if err == nil {
+			return p, r, nil
+		} else if i > count {
+			return p, r, err
+		}
+		i++
+	}
 }
 
 func filterPRsForTime(unfiltered []*github.PullRequest, startTime time.Time, endTime time.Time) []*github.PullRequest {
@@ -195,10 +212,12 @@ func filterPRsForTouch(client *github.Client, unfiltered []*github.PullRequest, 
 func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []string) bool {
 	page := 0
 	for {
-		c, r, err := client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
-			ListOptions: github.ListOptions{
-				Page: page,
-			},
+		c, r, err := retryListCommentsUpTo(retryCount, func() ([]*github.IssueComment, *github.Response, error) {
+			return client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
+				ListOptions: github.ListOptions{
+					Page: page,
+				},
+			})
 		})
 			time.Sleep(sleep)
 		if err != nil {
@@ -216,14 +235,28 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 	}
 }
 
+func retryListCommentsUpTo(count int, f func() ([]*github.IssueComment, *github.Response, error)) ([]*github.IssueComment, *github.Response, error) {
+		i := 1
+	for {
+		c, r, err := f()
+		time.Sleep(sleep)
+		if err == nil {
+			return c, r, nil
+		} else if i > count {
+			return c, r, err
+		}
+		i++
+	}
+}
+
 func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string) bool {
 	page := 0
 	for {
-		c, r, err := client.PullRequests.ListReviews(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
-			Page: page,
+		c, r, err := retryListReviewsUpTo(retryCount, func() ([]*github.PullRequestReview, *github.Response, error) {
+			return client.PullRequests.ListReviews(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
+				Page: page,
+			})
 		})
-			time.Sleep(sleep)
-
 		if err != nil {
 			log.Fatalf("Unable to get reviews on PR %v: %v", pr.GetNumber(), err)
 		}
@@ -236,6 +269,20 @@ func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string)
 		if page == 0 {
 			return false
 		}
+	}
+}
+
+func retryListReviewsUpTo(count int, f func() ([]*github.PullRequestReview, *github.Response, error)) ([]*github.PullRequestReview, *github.Response, error) {
+		i := 1
+	for {
+		c, r, err := f()
+		time.Sleep(sleep)
+		if err == nil {
+			return c, r, nil
+		} else if i > count {
+			return c, r, err
+		}
+		i++
 	}
 }
 
@@ -281,10 +328,12 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 	count = 0
 	page := 0
 	for {
-		f, r, err := lc.client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
-			Page: page,
+		f, r, err := retryListFilesUpTo(retryCount, func() ([]*github.CommitFile, *github.Response, error) {
+
+			return lc.client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
+				Page: page,
+			})
 		})
-			time.Sleep(sleep)
 
 		if err != nil {
 			log.Fatalf("Unable to get files on PR %v: %v", pr.GetNumber(), err)
@@ -303,4 +352,18 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 	defer lc.cacheLock.Unlock()
 	lc.cache[pr.GetHTMLURL()] = count
 	return count
+}
+
+func retryListFilesUpTo(count int, f func() ([]*github.CommitFile, *github.Response, error)) ([]*github.CommitFile, *github.Response, error) {
+		i := 1
+	for {
+		c, r, err := f()
+		time.Sleep(sleep)
+		if err == nil {
+			return c, r, nil
+		} else if i > count {
+			return c, r, err
+		}
+		i++
+	}
 }
