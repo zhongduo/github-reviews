@@ -24,7 +24,11 @@ var (
 	end = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
 	repos stringSlice
 	users stringSlice
-	parallelWorkers = 3
+
+	// The API limit seems to be 5000 requests per hour. So keep after every API request sleep
+	// for 0.75 seconds, which should limit the number of requests to 4800 requests per hour.
+	sleep = 750 * time.Millisecond
+	parallelWorkers = 1
 )
 
 type stringSlice []string
@@ -114,6 +118,7 @@ func listPRs(client *github.Client) []*github.PullRequest {
 					Page: page,
 				},
 			})
+			time.Sleep(sleep)
 			if err != nil {
 				log.Fatalf("Unable to list PRs for page: %v: %v", page, err)
 			}
@@ -195,6 +200,7 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 				Page: page,
 			},
 		})
+			time.Sleep(sleep)
 		if err != nil {
 			log.Fatalf("Unable to get comments on PR %v: %v", pr.GetNumber(), err)
 		}
@@ -216,6 +222,7 @@ func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string)
 		c, r, err := client.PullRequests.ListReviews(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
 			Page: page,
 		})
+			time.Sleep(sleep)
 
 		if err != nil {
 			log.Fatalf("Unable to get reviews on PR %v: %v", pr.GetNumber(), err)
@@ -277,12 +284,13 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 		f, r, err := lc.client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
 			Page: page,
 		})
+			time.Sleep(sleep)
 
 		if err != nil {
 			log.Fatalf("Unable to get files on PR %v: %v", pr.GetNumber(), err)
 		}
 		for _, file := range f {
-			if !strings.HasPrefix(file.GetFilename(), "vendor/") {
+			if !strings.HasPrefix(file.GetFilename(), "vendor/") && !strings.Contains(file.GetFilename(), "/vendor/") {
 				count += int64(file.GetAdditions())
 			}
 		}
