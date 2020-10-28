@@ -20,10 +20,10 @@ const (
 
 var (
 	tokenFile = flag.String("token_file", "", "Path to the token file")
-	owner     = flag.String("owner", "knative", "GitHub user name")
+	owner     = flag.String("owner", "knative", "GitHub repo owner's name (either org or user)")
 	start     = flag.String("start", time.Now().Format(timeFormat), "Start date in '%m-%d-%y' format")
 	end       = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
-	numWorker = flag.Int("num_workers", 1, "Number of parallel workers")
+	workers = flag.Int("workers", 1, "Number of parallel workers. If using more than one, you might hit the GitHub API rate limits and get throttled or temporarily banned.")
 	repos     stringSlice
 	users     stringSlice
 
@@ -51,7 +51,7 @@ func main() {
 	flag.Var(&users, "users", "Github users")
 	flag.Parse()
 
-	parallelWorkers = *numWorker
+	parallelWorkers = *workers
 
 	startTime, err := time.Parse(timeFormat, *start)
 	if err != nil {
