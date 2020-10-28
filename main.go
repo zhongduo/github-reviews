@@ -23,6 +23,7 @@ var (
 	owner     = flag.String("owner", "knative", "GitHub user name")
 	start     = flag.String("start", time.Now().Format(timeFormat), "Start date in '%m-%d-%y' format")
 	end       = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
+	numWorker = flag.Int("num_workers", 1, "Number of parallel workers")
 	repos     stringSlice
 	users     stringSlice
 
@@ -50,6 +51,8 @@ func main() {
 	flag.Var(&users, "users", "Github users")
 	flag.Parse()
 
+	parallelWorkers = *numWorker
+
 	startTime, err := time.Parse(timeFormat, *start)
 	if err != nil {
 		log.Fatalf("Unable to parse start time '%s': %v", *start, err)
@@ -61,7 +64,7 @@ func main() {
 
 	log.Printf("Searching for PRs between %v and %v", startTime.Format(timeFormat), endTime.Format(timeFormat))
 	client := github.NewClient(oauthClient())
-	prs := listPRs(client)
+	prs := listPRs(client, startTime)
 	log.Printf("Finished listing PRs. %v", len(prs))
 
 	timeFilteredPRs := filterPRsForTime(prs, startTime, endTime)
@@ -108,8 +111,8 @@ func readOauthToken() string {
 	return strings.TrimSuffix(s, "\n")
 }
 
-func listPRs(client *github.Client) []*github.PullRequest {
-	prs := make([]*github.PullRequest, 0)
+func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
+	prs := make([]*github.PullRequest, 1000)
 	for _, repo := range repos {
 		page := 0
 		for {
@@ -119,7 +122,8 @@ func listPRs(client *github.Client) []*github.PullRequest {
 					Sort:      "updated",
 					Direction: "desc",
 					ListOptions: github.ListOptions{
-						Page: page,
+						Page:    page,
+						PerPage: 100,
 					},
 				})
 			})
@@ -129,6 +133,10 @@ func listPRs(client *github.Client) []*github.PullRequest {
 			prs = append(prs, p...)
 			page = r.NextPage
 			if page == 0 {
+				break
+			}
+			// Early exit
+			if prs[len(prs)-1].UpdatedAt.Before(startTime) {
 				break
 			}
 		}
