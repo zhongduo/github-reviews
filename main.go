@@ -112,7 +112,7 @@ func readOauthToken() string {
 }
 
 func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
-	prs := make([]*github.PullRequest, 1000)
+	prs := make([]*github.PullRequest, 0)
 	for _, repo := range repos {
 		page := 0
 		for {
