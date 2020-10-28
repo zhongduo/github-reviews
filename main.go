@@ -222,11 +222,16 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 	page := 0
 	for {
 		c, r, err := retryListCommentsUpTo(retryCount, func() ([]*github.IssueComment, *github.Response, error) {
-			return client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
-				ListOptions: github.ListOptions{
-					Page: page,
-					PerPage: 100,
-				},
+			return client.Issues.ListComments(
+				context.TODO(),
+				pr.GetBase().GetRepo().GetOwner().GetLogin(),
+				pr.GetBase().GetRepo().GetName(),
+				pr.GetNumber(),
+				&github.IssueListCommentsOptions{
+					ListOptions: github.ListOptions{
+						Page: page,
+						PerPage: 100,
+					},
 			})
 		})
 		time.Sleep(sleep)
@@ -263,9 +268,15 @@ func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string)
 	page := 0
 	for {
 		c, r, err := retryListReviewsUpTo(retryCount, func() ([]*github.PullRequestReview, *github.Response, error) {
-			return client.PullRequests.ListReviews(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
-				Page: page,
-			})
+			return client.PullRequests.ListReviews(
+				context.TODO(),
+				pr.GetBase().GetRepo().GetOwner().GetLogin(),
+				pr.GetBase().GetRepo().GetName(),
+				pr.GetNumber(),
+				&github.ListOptions{
+					Page: page,
+					PerPage: 100,
+				})
 		})
 		if err != nil {
 			log.Fatalf("Unable to get reviews on PR %v: %v", pr.GetNumber(), err)
@@ -340,9 +351,15 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 	for {
 		f, r, err := retryListFilesUpTo(retryCount, func() ([]*github.CommitFile, *github.Response, error) {
 
-			return lc.client.PullRequests.ListFiles(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.ListOptions{
-				Page: page,
-			})
+			return lc.client.PullRequests.ListFiles(
+				context.TODO(),
+				pr.GetBase().GetRepo().GetOwner().GetLogin(),
+				pr.GetBase().GetRepo().GetName(),
+				pr.GetNumber(),
+				&github.ListOptions{
+					Page: page,
+					PerPage: 100,
+				})
 		})
 
 		if err != nil {
