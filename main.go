@@ -120,7 +120,7 @@ func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
 					Direction: "desc",
 					ListOptions: github.ListOptions{
 						Page:    page,
-						PerPage: 50,
+						PerPage: 100,
 					},
 				})
 			})
@@ -222,8 +222,7 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 			return client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
 				Since: &startTime,
 				ListOptions: github.ListOptions{
-					Page:    page,
-					PerPage: 20,
+					Page: page,
 				},
 			})
 		})
