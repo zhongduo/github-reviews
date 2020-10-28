@@ -23,13 +23,14 @@ var (
 	owner     = flag.String("owner", "knative", "GitHub user name")
 	start     = flag.String("start", time.Now().Format(timeFormat), "Start date in '%m-%d-%y' format")
 	end       = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
+	numWorker = flag.Int("num_workers", 1, "Number of parallel workers")
 	repos     stringSlice
 	users     stringSlice
 
 	// The API limit seems to be 5000 requests per hour. So keep after every API request sleep
 	// for 0.75 seconds, which should limit the number of requests to 4800 requests per hour.
 	sleep           = 750 * time.Millisecond
-	parallelWorkers = 16
+	parallelWorkers = 1
 
 	retryCount = 5
 )
@@ -49,6 +50,8 @@ func main() {
 	flag.Var(&repos, "repos", "Repo name")
 	flag.Var(&users, "users", "Github users")
 	flag.Parse()
+
+	parallelWorkers = *numWorker
 
 	startTime, err := time.Parse(timeFormat, *start)
 	if err != nil {
@@ -70,7 +73,7 @@ func main() {
 	otherAuthorPRs, authoredPRs := filterPRsForAuthors(timeFilteredPRs, users)
 	log.Printf("Finished filtering PRs for authors. %v", len(otherAuthorPRs))
 
-	reviewedPRs := filterPRsForTouch(client, otherAuthorPRs, users, startTime)
+	reviewedPRs := filterPRsForTouch(client, otherAuthorPRs, users)
 	log.Printf("Total PRs: %v. Commented PRs: %v", len(otherAuthorPRs), len(reviewedPRs))
 
 	lc := &lineCounter{
@@ -109,7 +112,7 @@ func readOauthToken() string {
 }
 
 func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
-	prs := make([]*github.PullRequest, 0)
+	prs := make([]*github.PullRequest, 1000)
 	for _, repo := range repos {
 		page := 0
 		for {
@@ -128,12 +131,12 @@ func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
 				log.Fatalf("Unable to list PRs for page: %v: %v", page, err)
 			}
 			prs = append(prs, p...)
-			// Early exit
-			if prs[len(prs)-1].UpdatedAt.Before(startTime) {
-				break
-			}
 			page = r.NextPage
 			if page == 0 {
+				break
+			}
+			// Early exit
+			if prs[len(prs)-1].UpdatedAt.Before(startTime) {
 				break
 			}
 		}
@@ -187,14 +190,14 @@ func contains(set []string, s string) bool {
 	return false
 }
 
-func filterPRsForTouch(client *github.Client, unfiltered []*github.PullRequest, users []string, startTime time.Time) []*github.PullRequest {
+func filterPRsForTouch(client *github.Client, unfiltered []*github.PullRequest, users []string) []*github.PullRequest {
 	input := make(chan *github.PullRequest, len(unfiltered))
 	output := make(chan *github.PullRequest, len(unfiltered))
 	for i := 0; i < parallelWorkers; i++ {
 		go func() {
 			for {
 				pr := <-input
-				if prReviewedBy(client, pr, users, startTime) || prCommentedOnBy(client, pr, users, startTime) {
+				if prReviewedBy(client, pr, users) || prCommentedOnBy(client, pr, users) {
 					output <- pr
 				} else {
 					output <- nil
@@ -215,12 +218,11 @@ func filterPRsForTouch(client *github.Client, unfiltered []*github.PullRequest, 
 	return prs
 }
 
-func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []string, startTime time.Time) bool {
+func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []string) bool {
 	page := 0
 	for {
 		c, r, err := retryListCommentsUpTo(retryCount, func() ([]*github.IssueComment, *github.Response, error) {
 			return client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
-				Since: &startTime,
 				ListOptions: github.ListOptions{
 					Page: page,
 				},
@@ -256,7 +258,7 @@ func retryListCommentsUpTo(count int, f func() ([]*github.IssueComment, *github.
 	}
 }
 
-func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string, startTime time.Time) bool {
+func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string) bool {
 	page := 0
 	for {
 		c, r, err := retryListReviewsUpTo(retryCount, func() ([]*github.PullRequestReview, *github.Response, error) {
