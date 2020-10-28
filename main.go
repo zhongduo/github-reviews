@@ -19,15 +19,15 @@ const (
 
 var (
 	tokenFile = flag.String("token_file", "", "Path to the token file")
-	owner = flag.String("owner", "knative", "GitHub user name")
+	owner     = flag.String("owner", "knative", "GitHub user name")
 	start     = flag.String("start", time.Now().Format(timeFormat), "Start date in '%m-%d-%y' format")
-	end = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
-	repos stringSlice
-	users stringSlice
+	end       = flag.String("end", time.Now().Format(timeFormat), "End date in %m-%d-%y format")
+	repos     stringSlice
+	users     stringSlice
 
 	// The API limit seems to be 5000 requests per hour. So keep after every API request sleep
 	// for 0.75 seconds, which should limit the number of requests to 4800 requests per hour.
-	sleep = 750 * time.Millisecond
+	sleep           = 750 * time.Millisecond
 	parallelWorkers = 1
 
 	retryCount = 5
@@ -74,7 +74,7 @@ func main() {
 
 	lc := &lineCounter{
 		client: client,
-		cache: map[string]int64{},
+		cache:  map[string]int64{},
 	}
 	totalLinesAdded := lc.added(timeFilteredPRs)
 	log.Printf("Total lines added: %v", totalLinesAdded)
@@ -88,7 +88,7 @@ func main() {
 		log.Printf("Percent non-authored lines reviewed: %v", float64(reviewedLinesAdded)/float64(totalNonAuthoredLinesAdded))
 	}
 	if totalLinesAdded > 0 {
-		log.Printf("Percent of all lines authored or reviewed: %v", float64(authoredLinesAdded + reviewedLinesAdded)/float64(totalLinesAdded))
+		log.Printf("Percent of all lines authored or reviewed: %v", float64(authoredLinesAdded+reviewedLinesAdded)/float64(totalLinesAdded))
 	}
 }
 
@@ -219,7 +219,7 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 				},
 			})
 		})
-			time.Sleep(sleep)
+		time.Sleep(sleep)
 		if err != nil {
 			log.Fatalf("Unable to get comments on PR %v: %v", pr.GetNumber(), err)
 		}
@@ -236,7 +236,7 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 }
 
 func retryListCommentsUpTo(count int, f func() ([]*github.IssueComment, *github.Response, error)) ([]*github.IssueComment, *github.Response, error) {
-		i := 1
+	i := 1
 	for {
 		c, r, err := f()
 		time.Sleep(sleep)
@@ -273,7 +273,7 @@ func prReviewedBy(client *github.Client, pr *github.PullRequest, users []string)
 }
 
 func retryListReviewsUpTo(count int, f func() ([]*github.PullRequestReview, *github.Response, error)) ([]*github.PullRequestReview, *github.Response, error) {
-		i := 1
+	i := 1
 	for {
 		c, r, err := f()
 		time.Sleep(sleep)
@@ -287,8 +287,8 @@ func retryListReviewsUpTo(count int, f func() ([]*github.PullRequestReview, *git
 }
 
 type lineCounter struct {
-	client *github.Client
-	cache map[string]int64
+	client    *github.Client
+	cache     map[string]int64
 	cacheLock sync.Mutex
 }
 
@@ -321,7 +321,7 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 			return count
 		}
 		return -1
-		}()
+	}()
 	if count != -1 {
 		return count
 	}
@@ -355,7 +355,7 @@ func (lc *lineCounter) countNonVendorLines(pr *github.PullRequest) int64 {
 }
 
 func retryListFilesUpTo(count int, f func() ([]*github.CommitFile, *github.Response, error)) ([]*github.CommitFile, *github.Response, error) {
-		i := 1
+	i := 1
 	for {
 		c, r, err := f()
 		time.Sleep(sleep)
