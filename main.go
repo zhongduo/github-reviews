@@ -112,7 +112,7 @@ func readOauthToken() string {
 }
 
 func listPRs(client *github.Client, startTime time.Time) []*github.PullRequest {
-	prs := make([]*github.PullRequest, 1000)
+	prs := make([]*github.PullRequest, 0, 10_000)
 	for _, repo := range repos {
 		page := 0
 		for {
@@ -159,7 +159,7 @@ func retryListUpTo(count int, f func() ([]*github.PullRequest, *github.Response,
 }
 
 func filterPRsForTime(unfiltered []*github.PullRequest, startTime time.Time, endTime time.Time) []*github.PullRequest {
-	prs := make([]*github.PullRequest, 0)
+	prs := make([]*github.PullRequest, 0, len(unfiltered))
 	for _, pr := range unfiltered {
 		if pr.UpdatedAt.After(startTime) && pr.CreatedAt.Before(endTime) {
 			prs = append(prs, pr)
@@ -169,8 +169,8 @@ func filterPRsForTime(unfiltered []*github.PullRequest, startTime time.Time, end
 }
 
 func filterPRsForAuthors(unfiltered []*github.PullRequest, authors []string) ([]*github.PullRequest, []*github.PullRequest) {
-	prs := make([]*github.PullRequest, 0)
-	authoredPRs := make([]*github.PullRequest, 0)
+	prs := make([]*github.PullRequest, 0, len(unfiltered))
+	authoredPRs := make([]*github.PullRequest, 0, len(unfiltered))
 	for _, pr := range unfiltered {
 		if contains(authors, pr.GetUser().GetLogin()) {
 			authoredPRs = append(authoredPRs, pr)
@@ -208,7 +208,7 @@ func filterPRsForTouch(client *github.Client, unfiltered []*github.PullRequest, 
 	for _, pr := range unfiltered {
 		input <- pr
 	}
-	prs := make([]*github.PullRequest, 0)
+	prs := make([]*github.PullRequest, 0, len(unfiltered))
 	for range unfiltered {
 		pr := <-output
 		if pr != nil {
@@ -225,6 +225,7 @@ func prCommentedOnBy(client *github.Client, pr *github.PullRequest, users []stri
 			return client.Issues.ListComments(context.TODO(), pr.GetBase().GetRepo().GetOwner().GetLogin(), pr.GetBase().GetRepo().GetName(), pr.GetNumber(), &github.IssueListCommentsOptions{
 				ListOptions: github.ListOptions{
 					Page: page,
+					PerPage: 100,
 				},
 			})
 		})
